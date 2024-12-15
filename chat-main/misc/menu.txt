@@ -1,0 +1,17 @@
+Please choose an option:
+
+1. Create a Room
+    - Enter a code to create a new chat room.
+
+2. Connect to a Room
+    - Enter the code of the chat room you want to join.
+
+3. Global Chat
+    - Join the global chat room.
+
+4. Change username
+    - Duh...
+
+5. Exit
+
+Enter your choice (1, 2, 3, 4 or 5):
