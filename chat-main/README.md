@@ -12,6 +12,7 @@ This project is a simple TCP-based chat server written in Go. It allows multiple
 
 - Multiple clients can connect to the server.
 - Clients can create and join chat rooms.
+- Rooms can be password protected(Private) or public
 - Global chat room available for all users.
 - Username validation to prevent duplicates.
 - Commands for changing username, leaving rooms, and getting help.
@@ -19,11 +20,23 @@ This project is a simple TCP-based chat server written in Go. It allows multiple
 
 ## Usage
 
+0. **Build the executable**
+    ```sh
+    go build main.go -o TCPChat
+    ```
+
 1. **Start the Server:**
     ```sh
-    go run main.go
+    go run ./TCPChat
     ```
     The server will start listening on port `3000`.
+
+    _or_
+
+    ```sh
+    go run ./TCPChat <port>
+    ```
+    The server will start listening on the port specified by the user
 
 2. **Connect to the Server:**
     Use any TCP client to connect to the server. For example, using `netcat`:
