@@ -12,6 +12,9 @@ Please choose an option:
 4. Change username
     - Duh...
 
-5. Exit
+5. List all rooms
+    - View all rooms and their status.
 
-Enter your choice (1, 2, 3, 4 or 5):
+6. Exit
+
+Enter your choice (1, 2, 3, 4, 5 or 6):

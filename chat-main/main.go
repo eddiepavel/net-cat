@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -28,10 +27,11 @@ type Server struct {
 }
 
 type Room struct {
-	name    string
-	clients map[net.Conn]string
-	channel chan Message
-	mu      sync.Mutex
+	name     string
+	clients  map[net.Conn]string
+	channel  chan Message
+	password string
+	mu       sync.Mutex
 }
 
 func NewServer(listenAddr string) *Server {
@@ -94,24 +94,28 @@ func (s *Server) displayMenu(conn net.Conn) {
 				if scanner.Scan() {
 					roomCode := strings.TrimSpace(scanner.Text())
 					s.createRoom(roomCode, conn)
-					return // Exit the loop after creating a room
+					return
 				}
 			case "2":
 				s.handleRender(conn, "./misc/join_room.txt")
 				if scanner.Scan() {
 					roomCode := strings.TrimSpace(scanner.Text())
 					s.joinRoom(roomCode, conn)
-					return // Exit the loop after joining a room
+					return
 				}
 			case "3":
 				s.joinRoom("global", conn)
-				return // Exit the loop after joining the global chat
+				return
 			case "4":
 				s.changeUsername(conn, nil)
 			case "5":
+				s.listRooms(conn)
+				time.Sleep(700 * time.Millisecond)
+			case "6":
 				conn.Write([]byte("Goodbye!\n"))
 				conn.Close()
-				return // Exit the loop after exiting
+				s.handleDisconnect(conn, nil)
+				return
 			default:
 				conn.Write([]byte("Invalid option. Please try again.\n"))
 			}
@@ -158,10 +162,17 @@ func (s *Server) createRoom(roomCode string, conn net.Conn) {
 		conn.Close()
 		return
 	}
+	conn.Write([]byte("Enter a password for the room (leave blank for public room): "))
+	scanner := bufio.NewScanner(conn)
+	var password string
+	if scanner.Scan() {
+		password = strings.TrimSpace(scanner.Text())
+	}
 	room := &Room{
-		name:    roomCode,
-		clients: make(map[net.Conn]string),
-		channel: make(chan Message, 10),
+		name:     roomCode,
+		clients:  make(map[net.Conn]string),
+		channel:  make(chan Message, 10),
+		password: password,
 	}
 	s.rooms[roomCode] = room
 	room.clients[conn] = s.clients[conn]
@@ -187,6 +198,18 @@ func (s *Server) joinRoom(roomCode string, conn net.Conn) {
 		conn.Close()
 		return
 	}
+	if room.password != "" {
+		conn.Write([]byte("Enter the room password: "))
+		scanner := bufio.NewScanner(conn)
+		if scanner.Scan() {
+			password := strings.TrimSpace(scanner.Text())
+			if password != room.password {
+				conn.Write([]byte("Incorrect password. Disconnecting.\n"))
+				conn.Close()
+				return
+			}
+		}
+	}
 	room.clients[conn] = s.clients[conn]
 	conn.Write([]byte(fmt.Sprintf("Welcome to the chat! You have joined room: %s\nUse /help to see all available commands\n", roomCode)))
 	go func() {
@@ -200,12 +223,37 @@ func (s *Server) joinRoom(roomCode string, conn net.Conn) {
 }
 
 func (s *Server) leaveRoom(conn net.Conn, room *Room) {
-	room.mu.Lock()
-	defer room.mu.Unlock()
-	username := room.clients[conn]
-	delete(room.clients, conn)
-	logToFile(fmt.Sprintf("User '%s' left room '%s'\n", username, room.name))
-	go s.broadcastDisconnect(username, room)
+	s.handleDisconnect(conn, room)
+}
+
+func (s *Server) listRooms(conn net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conn.Write([]byte("Room List:\n"))
+	for roomCode, room := range s.rooms {
+		status := "Public"
+		if room.password != "" {
+			status = "Private"
+		}
+		conn.Write([]byte(fmt.Sprintf("Room: %s, Status: %s, Users: %d\n", roomCode, status, len(room.clients))))
+	}
+	conn.Write([]byte("\n"))
+}
+
+func (s *Server) handleDisconnect(conn net.Conn, room *Room) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	username, exists := s.clients[conn]
+	if exists {
+		delete(s.clients, conn)
+		logToFile(fmt.Sprintf("Client connection stopped. Username '%s' is now available.", username))
+		if room != nil {
+			room.mu.Lock()
+			delete(room.clients, conn)
+			room.mu.Unlock()
+			s.broadcastDisconnect(username, room)
+		}
+	}
 }
 
 func (s *Server) roomBroadcastLoop(room *Room) {
@@ -277,6 +325,7 @@ func (s *Server) readLoop(conn net.Conn, room *Room) {
 		n, err := conn.Read(buf)
 		if err != nil {
 			logToFile("Read error:", err)
+			s.handleDisconnect(conn, room)
 			return
 		}
 		message := strings.TrimSpace(string(buf[:n]))
@@ -331,7 +380,7 @@ func (r *Room) broadcastConnect(username string, newConn net.Conn) {
 
 func logToFile(v ...interface{}) {
 	message := fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprint(v...))
-	fmt.Println(message) // Write to the terminal
+	fmt.Println(message)
 	writeToFile("./logs/server.log", message)
 }
 
@@ -348,7 +397,14 @@ func writeToFile(filePath, message string) {
 }
 
 func main() {
-	server := NewServer(":3000")
+	port := "3000"
+	if len(os.Args) > 2 {
+		fmt.Println("[USAGE]: ./TCPChat $port")
+		return
+	} else if len(os.Args) == 2 {
+		port = os.Args[1]
+	}
+	server := NewServer(":" + port)
 	server.rooms["global"] = &Room{
 		name:    "global",
 		clients: make(map[net.Conn]string),
@@ -363,7 +419,7 @@ func main() {
 	}
 	defer file.Close()
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(c, os.Interrupt)
 	go func() {
 		<-c
 		logToFile("Server is shutting down")
