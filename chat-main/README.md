@@ -22,7 +22,7 @@ This project is a simple TCP-based chat server written in Go. It allows multiple
 
 0. **Build the executable**
     ```sh
-    go build -o TCPChat main.gos
+    go build -o TCPChat main.go
     ```
 
 1. **Start the Server:**
