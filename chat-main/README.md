@@ -17,6 +17,7 @@ This project is a simple TCP-based chat server written in Go. It allows multiple
 - Username validation to prevent duplicates.
 - Commands for changing username, leaving rooms, and getting help.
 - Logging of chat messages and server events.
+- Private messaging betweeb users of the same room
 
 ## Usage
 

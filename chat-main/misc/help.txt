@@ -1,3 +1,4 @@
 /leave - change rooms
 /quit  - exit the app
 /name  - change username
+/msg <name> <text> - send a private message to <name> within a room

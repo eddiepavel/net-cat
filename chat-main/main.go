@@ -110,7 +110,6 @@ func (s *Server) displayMenu(conn net.Conn) {
 				s.changeUsername(conn, nil)
 			case "5":
 				s.listRooms(conn)
-				time.Sleep(700 * time.Millisecond)
 			case "6":
 				conn.Write([]byte("Goodbye!\n"))
 				conn.Close()
@@ -214,7 +213,6 @@ func (s *Server) joinRoom(roomCode string, conn net.Conn) {
 	conn.Write([]byte(fmt.Sprintf("Welcome to the chat! You have joined room: %s\nUse /help to see all available commands\n", roomCode)))
 	go func() {
 		s.handleRender(conn, "./logs/"+roomCode+".txt")
-		conn.Write([]byte("\n"))
 	}()
 	time.Sleep(100 * time.Millisecond)
 	go s.readLoop(conn, room)
@@ -237,7 +235,9 @@ func (s *Server) listRooms(conn net.Conn) {
 		}
 		conn.Write([]byte(fmt.Sprintf("Room: %s, Status: %s, Users: %d\n", roomCode, status, len(room.clients))))
 	}
-	conn.Write([]byte("\n"))
+	conn.Write([]byte("Press any key to return to the menu..."))
+	scanner := bufio.NewScanner(conn)
+	scanner.Scan()
 }
 
 func (s *Server) handleDisconnect(conn net.Conn, room *Room) {
@@ -317,6 +317,9 @@ func (s *Server) handleRender(conn net.Conn, file string) {
 			conn.Write([]byte(line))
 		}
 	}
+	if file != "./misc/welcome.txt" {
+		conn.Write([]byte("\n"))
+	}
 }
 
 func (s *Server) readLoop(conn net.Conn, room *Room) {
@@ -329,6 +332,10 @@ func (s *Server) readLoop(conn net.Conn, room *Room) {
 			return
 		}
 		message := strings.TrimSpace(string(buf[:n]))
+		if strings.HasPrefix(message, "/msg") {
+			room.handlePrivateMessage(conn, message)
+			continue
+		}
 		switch message {
 		case "/leave":
 			conn.Write([]byte("You have left the room. Returning to menu...\n"))
@@ -341,13 +348,51 @@ func (s *Server) readLoop(conn net.Conn, room *Room) {
 			conn.Close()
 			return
 		case "/help":
-			go s.handleRender(conn, "help.txt")
+			go s.handleRender(conn, "./misc/help.txt")
 		case "/name":
 			s.changeUsername(conn, room)
 		default:
 			room.channel <- Message{from: room.clients[conn], payload: buf[:n]}
 		}
 	}
+}
+
+func (r *Room) handlePrivateMessage(conn net.Conn, message string) {
+	parts := strings.SplitN(message, " ", 3)
+	if len(parts) < 3 {
+		conn.Write([]byte("Usage: /msg <username> <message>\n"))
+		return
+	}
+	targetUsername := parts[1]
+	privateMessage := parts[2]
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var targetConn net.Conn
+	for c, username := range r.clients {
+		if username == targetUsername {
+			targetConn = c
+			break
+		}
+	}
+
+	if targetConn == nil {
+		conn.Write([]byte("User not found.\n"))
+		return
+	}
+
+	senderUsername := r.clients[conn]
+	formattedMessage := fmt.Sprintf("[Private][%s]: %s\n", senderUsername, privateMessage)
+	_, err := targetConn.Write([]byte(formattedMessage))
+	if err != nil {
+		logToFile("Failed to send private message to client:", targetConn.RemoteAddr(), err)
+		conn.Write([]byte("Failed to send private message.\n"))
+		return
+	}
+
+	conn.Write([]byte("Private message sent.\n"))
+	logToFile(fmt.Sprintf("User '%s' sent private message to '%s': %s", senderUsername, targetUsername, privateMessage))
 }
 
 func (s *Server) broadcastDisconnect(username string, room *Room) {
